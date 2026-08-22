@@ -30,12 +30,7 @@ type Email = {
 const configuredApi = import.meta.env.VITE_API_URL?.trim();
 const API = (configuredApi || (import.meta.env.DEV ? 'http://localhost:4000' : window.location.origin)).replace(/\/$/, '');
 
-const scheduledStatuses = [
-  'PENDING',
-  'QUEUED',
-  'PROCESSING',
-  'SCHEDULED',
-];
+const scheduledStatuses = ['PENDING', 'PROCESSING', 'SCHEDULED'];
 
 const formatTime = (value?: string | null) =>
   value
@@ -76,7 +71,7 @@ const buttonBase =
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [emails, setEmails] = useState<Email[]>([]);
-  const [view, setView] = useState<'scheduled' | 'sent'>('scheduled');
+  const [view, setView] = useState<'queued' | 'scheduled' | 'sent'>('queued');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -123,7 +118,9 @@ export default function App() {
         const matchesView =
           view === 'sent'
             ? ['SENT', 'FAILED'].includes(email.status)
-            : scheduledStatuses.includes(email.status);
+            : view === 'queued'
+              ? email.status === 'QUEUED'
+              : scheduledStatuses.includes(email.status);
 
         const query = search.toLowerCase();
 
@@ -153,6 +150,10 @@ export default function App() {
     email.status === 'QUEUED'
   ).length;
 
+  const scheduledCount = emails.filter((email) =>
+    scheduledStatuses.includes(email.status)
+  ).length;
+
   const sentCount = emails.filter((email) =>
     ['SENT', 'FAILED'].includes(email.status)
   ).length;
@@ -166,6 +167,7 @@ export default function App() {
         onCompose={() => setComposeOpen(true)}
         onLogout={() => void logout()}
         queuedCount={queuedCount}
+        scheduledCount={scheduledCount}
         sentCount={sentCount}
       />
 
@@ -211,15 +213,19 @@ export default function App() {
             </p>
 
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-              {view === 'scheduled'
-                ? 'Scheduled emails'
-                : 'Sent emails'}
+              {view === 'queued'
+                ? 'Queued emails'
+                : view === 'scheduled'
+                  ? 'Scheduled emails'
+                  : 'Sent emails'}
             </h1>
 
             <p className="mt-2 text-sm text-slate-500">
-              {view === 'scheduled'
-                ? 'Keep track of queued and upcoming messages.'
-                : 'Review messages delivered through your workspace.'}
+              {view === 'sent'
+                ? 'Review messages delivered through your workspace.'
+                : view === 'queued'
+                  ? 'Messages waiting to be sent.'
+                  : 'Keep track of upcoming scheduled messages.'}
             </p>
           </div>
 
@@ -257,14 +263,16 @@ function Sidebar({
   onCompose,
   onLogout,
   queuedCount,
+  scheduledCount,
   sentCount,
 }: {
   user: User;
-  active: 'scheduled' | 'sent';
-  onChange: (view: 'scheduled' | 'sent') => void;
+  active: 'queued' | 'scheduled' | 'sent';
+  onChange: (view: 'queued' | 'scheduled' | 'sent') => void;
   onCompose: () => void;
   onLogout: () => void;
   queuedCount: number;
+  scheduledCount: number;
   sentCount: number;
 }) {
   const [profileOpen, setProfileOpen] = useState(false);
@@ -354,10 +362,17 @@ function Sidebar({
         </button>
 
         <NavItem
-          active={active === 'scheduled'}
-          onClick={() => onChange('scheduled')}
+          active={active === 'queued'}
+          onClick={() => onChange('queued')}
           label="Queued"
           count={queuedCount}
+        />
+
+        <NavItem
+          active={active === 'scheduled'}
+          onClick={() => onChange('scheduled')}
+          label="Scheduled"
+          count={scheduledCount}
         />
 
         <NavItem
@@ -513,7 +528,7 @@ function EmailList({
   loading,
 }: {
   rows: Email[];
-  view: 'scheduled' | 'sent';
+  view: 'queued' | 'scheduled' | 'sent';
   loading: boolean;
 }) {
   return (
