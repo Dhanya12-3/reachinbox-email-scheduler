@@ -4,12 +4,15 @@ import crypto from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { OAuth2Client } from 'google-auth-library';
 import { z } from 'zod';
-import env from './config';
+import env, { frontendOrigins } from './config';
 import { enqueueEmail } from './queue';
 
 const prisma = new PrismaClient();
 const app = express();
-app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
+app.use(cors({
+  origin: (origin, callback) => callback(null, !origin || frontendOrigins.includes(origin)),
+  credentials: true,
+}));
 app.use(express.json({ limit: '2mb' }));
 
 const sessionCookie = 'reachinbox_session';
@@ -54,7 +57,8 @@ async function createSession(userId: string) {
 }
 
 function setSession(response: express.Response, token: string) {
-  response.setHeader('Set-Cookie', `${sessionCookie}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800`);
+  const sameSite = process.env.NODE_ENV === 'production' ? 'SameSite=None; Secure' : 'SameSite=Lax';
+  response.setHeader('Set-Cookie', `${sessionCookie}=${token}; HttpOnly; ${sameSite}; Path=/; Max-Age=604800`);
 }
 
 app.get('/', (_req, res) => res.json({ name: 'ReachInbox Email Scheduler API', dashboard: env.FRONTEND_URL, health: '/api/health' }));
@@ -77,7 +81,8 @@ app.post('/auth/logout', async (req, res) => {
   const token = cookieValue(req, sessionCookie);
   if (token) await prisma.authSession.deleteMany({ where: { id: token } });
 
-  res.setHeader('Set-Cookie', `${sessionCookie}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+  const sameSite = process.env.NODE_ENV === 'production' ? 'SameSite=None; Secure' : 'SameSite=Lax';
+  res.setHeader('Set-Cookie', `${sessionCookie}=; HttpOnly; ${sameSite}; Path=/; Max-Age=0`);
   res.json({ ok: true });
 });
 
@@ -97,12 +102,13 @@ app.post('/auth/email', async (req, res) => {
 });
 
 app.get('/auth/google', (_req, res) => {
-  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || env.GOOGLE_CALLBACK_URL !== 'http://localhost:4000/auth/google/callback') {
+  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || !env.GOOGLE_CALLBACK_URL) {
     return res.status(501).json({ error: 'Google OAuth is not configured correctly.' });
   }
 
   const state = crypto.randomBytes(24).toString('hex');
-  res.setHeader('Set-Cookie', `reachinbox_oauth_state=${state}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600`);
+  const sameSite = process.env.NODE_ENV === 'production' ? 'SameSite=None; Secure' : 'SameSite=Lax';
+  res.setHeader('Set-Cookie', `reachinbox_oauth_state=${state}; HttpOnly; ${sameSite}; Path=/; Max-Age=600`);
 
   const client = new OAuth2Client(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET, env.GOOGLE_CALLBACK_URL);
   res.redirect(client.generateAuthUrl({ access_type: 'offline', scope: ['openid', 'email', 'profile'], prompt: 'select_account', state }));
@@ -114,7 +120,9 @@ app.get('/auth/google/callback', async (req, res) => {
   }
 
   try {
-    if (String(req.query.state) !== cookieValue(req, 'reachinbox_oauth_state')) return res.status(400).send('Invalid OAuth state.');
+    const stateCookie = cookieValue(req, 'reachinbox_oauth_state');
+    res.append('Set-Cookie', 'reachinbox_oauth_state=; HttpOnly; SameSite=None; Secure; Path=/; Max-Age=0');
+    if (!req.query.code || String(req.query.state) !== stateCookie) return res.status(400).send('Invalid OAuth state.');
 
     const client = new OAuth2Client(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET, env.GOOGLE_CALLBACK_URL);
     const { tokens } = await client.getToken(String(req.query.code));

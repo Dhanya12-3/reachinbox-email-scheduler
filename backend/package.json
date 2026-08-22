@@ -3,9 +3,11 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "worker": "tsx src/worker.ts",
+    "start": "node dist/index.js",
+    "start:worker": "node dist/worker.js",
     "build": "tsc",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma db execute --schema prisma/schema.prisma --file prisma/setup.sql"
+    "db:migrate": "prisma migrate deploy"
   },
   "dependencies": {
     "@prisma/client": "^6.7.0",

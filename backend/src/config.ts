@@ -12,4 +12,13 @@ const env = z.object({
   MAX_EMAILS_PER_HOUR: z.coerce.number().int().positive().default(200),
   MIN_SEND_DELAY_MS: z.coerce.number().int().nonnegative().default(2000)
 }).parse(process.env);
+
+try {
+  const redisProtocol = new URL(env.REDIS_URL).protocol;
+  if (!['redis:', 'rediss:'].includes(redisProtocol) || env.REDIS_URL.includes('redis-cli')) throw new Error();
+} catch {
+  throw new Error('REDIS_URL must be a redis:// or rediss:// connection URL.');
+}
+
+export const frontendOrigins = env.FRONTEND_URL.split(',').map(origin => origin.trim()).filter(Boolean);
 export default env;

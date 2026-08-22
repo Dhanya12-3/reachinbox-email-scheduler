@@ -33,7 +33,7 @@ type Email = {
   status: string;
 };
 
-const API = 'https://reachinbox-email-scheduler-6tjl.onrender.com';
+const API = import.meta.env.VITE_API_URL.replace(/\/$/, '');
 
 const scheduledStatuses = [
   'PENDING',
