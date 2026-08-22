@@ -61,6 +61,15 @@ function setSession(response: express.Response, token: string) {
   response.setHeader('Set-Cookie', `${sessionCookie}=${token}; HttpOnly; ${sameSite}; Path=/; Max-Age=604800`);
 }
 
+async function enqueueWithTimeout(emailId: string, sender: string, scheduledAt: Date) {
+  return Promise.race([
+    enqueueEmail(emailId, sender, scheduledAt),
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Queue insertion timed out.')), 8000);
+    }),
+  ]);
+}
+
 async function resolveSender(user: { id: string; email: string }, senderId?: string) {
   if (senderId) {
     return prisma.sender.findFirst({ where: { id: senderId, userId: user.id } });
@@ -349,10 +358,10 @@ app.post('/api/campaigns', async (req, res) => {
   });
 
   try {
-    for (const email of campaign.emails) {
-      const job = await enqueueEmail(email.id, sender.email, email.scheduledAt);
+    await Promise.all(campaign.emails.map(async email => {
+      const job = await enqueueWithTimeout(email.id, sender.email, email.scheduledAt);
       await prisma.scheduledEmail.update({ where: { id: email.id }, data: { bullJobId: job.id } });
-    }
+    }));
   } catch (error) {
     console.error('Queue insertion failed; restart reconciliation will retry queued emails.', error instanceof Error ? error.message : 'unknown error');
   }
