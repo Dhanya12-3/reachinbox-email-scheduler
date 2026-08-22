@@ -30,7 +30,7 @@ Create a separate background worker service from the same repository:
 - Build: `npm install && npm run db:generate && npm run build`
 - Start: `npm run start:worker`
 
-Backend variables: `DATABASE_URL`, `REDIS_URL`, `FRONTEND_URL`, `NODE_ENV=production`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL`, `ETHEREAL_USER`, and `ETHEREAL_PASS`. Set `FRONTEND_URL` to the deployed frontend origin; comma-separated origins are supported for local plus production access.
+Backend variables: `DATABASE_URL`, `REDIS_URL`, `FRONTEND_URL`, `NODE_ENV`, `MAIL_PROVIDER`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CALLBACK_URL`. For production HTTPS delivery, set `MAIL_PROVIDER=resend`, `RESEND_API_KEY`, and a verified `RESEND_FROM` address. For local Ethereal SMTP, set `MAIL_PROVIDER=smtp`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `ETHEREAL_USER`, and `ETHEREAL_PASS`. Set `FRONTEND_URL` to the deployed frontend origin; comma-separated origins are supported for local plus production access.
 
 Frontend variable: `VITE_API_URL`, set to the deployed backend URL, with no trailing slash.
 

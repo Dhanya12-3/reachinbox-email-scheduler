@@ -40,7 +40,8 @@ async function transport() {
 
 async function sendWithResend(input: { id: string; recipient: string; sender: string; subject: string; body: string }) {
   if (!env.RESEND_API_KEY) throw new Error('RESEND_API_KEY is required when MAIL_PROVIDER=resend.');
-  console.log(`Resend send starting: recipient=${input.recipient} from=${input.sender}`);
+  if (!env.RESEND_FROM) throw new Error('RESEND_FROM is required when MAIL_PROVIDER=resend.');
+  console.log(`Resend send starting: recipient=${input.recipient} from=${env.RESEND_FROM}`);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
@@ -48,7 +49,7 @@ async function sendWithResend(input: { id: string; recipient: string; sender: st
       method: 'POST',
       signal: controller.signal,
       headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: env.RESEND_FROM || input.sender, to: [input.recipient], subject: input.subject, text: input.body, headers: { 'Message-ID': `<${input.id}@reachinbox.local>` } }),
+      body: JSON.stringify({ from: env.RESEND_FROM, to: [input.recipient], subject: input.subject, text: input.body, headers: { 'Message-ID': `<${input.id}@reachinbox.local>` } }),
     });
     const data = await response.json().catch(() => ({})) as { id?: string; message?: string };
     if (!response.ok) throw new Error(`Resend HTTP ${response.status}: ${data.message ?? 'request failed'}`);
