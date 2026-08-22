@@ -22,7 +22,7 @@ const scheduleSchema = z.object({
   subject: z.string().min(1).max(300),
   body: z.string().min(1),
   recipients: z.array(emailSchema).min(1).max(10000),
-  senderId: z.string().min(1),
+  senderId: z.string().optional(),
   startTime: z.string().datetime(),
   delayMs: z.number().int().min(0).max(86_400_000).default(env.MIN_SEND_DELAY_MS),
   hourlyLimit: z.number().int().positive().max(10000).default(env.MAX_EMAILS_PER_HOUR),
@@ -296,8 +296,10 @@ app.post('/api/campaigns', async (req, res) => {
   }
 
   const recipients = [...new Set(data.recipients.map(email => email.toLowerCase()))];
-  const sender = await prisma.sender.findFirst({ where: { id: data.senderId, userId: user.id } });
-  if (!sender) return res.status(403).json({ error: 'Sender does not belong to this user.' });
+  const sender = data.senderId
+    ? await prisma.sender.findFirst({ where: { id: data.senderId, userId: user.id } })
+    : await prisma.sender.findFirst({ where: { userId: user.id }, orderBy: { createdAt: 'asc' } });
+  if (!sender) return res.status(400).json({ error: 'Create a sender before scheduling.' });
 
   const campaign = await prisma.$transaction(async tx => {
     const record = await tx.campaign.create({

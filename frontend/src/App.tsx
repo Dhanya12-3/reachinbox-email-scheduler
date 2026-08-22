@@ -17,12 +17,6 @@ type User = {
   avatar?: string | null;
 };
 
-type Sender = {
-  id: string;
-  email: string;
-  name?: string | null;
-};
-
 type Email = {
   id: string;
   recipientEmail: string;
@@ -82,7 +76,6 @@ const buttonBase =
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [emails, setEmails] = useState<Email[]>([]);
-  const [senders, setSenders] = useState<Sender[]>([]);
   const [view, setView] = useState<'scheduled' | 'sent'>('scheduled');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -98,14 +91,10 @@ export default function App() {
         return;
       }
 
-      const [emailData, senderData] = await Promise.all([
-        api('/api/emails'),
-        api('/api/senders'),
-      ]);
+      const emailData = await api('/api/emails');
 
       setUser(me.user);
       setEmails(emailData.emails);
-      setSenders(senderData.senders);
       setError('');
     } catch (reason) {
       setError(
@@ -160,8 +149,8 @@ export default function App() {
     setUser(null);
   };
 
-  const scheduledCount = emails.filter((email) =>
-    scheduledStatuses.includes(email.status)
+  const queuedCount = emails.filter((email) =>
+    email.status === 'QUEUED'
   ).length;
 
   const sentCount = emails.filter((email) =>
@@ -176,7 +165,7 @@ export default function App() {
         onChange={setView}
         onCompose={() => setComposeOpen(true)}
         onLogout={() => void logout()}
-        scheduledCount={scheduledCount}
+        queuedCount={queuedCount}
         sentCount={sentCount}
       />
 
@@ -250,7 +239,6 @@ export default function App() {
 
       {composeOpen && (
         <Compose
-          senders={senders}
           onClose={() => setComposeOpen(false)}
           onDone={() => {
             setComposeOpen(false);
@@ -268,7 +256,7 @@ function Sidebar({
   onChange,
   onCompose,
   onLogout,
-  scheduledCount,
+  queuedCount,
   sentCount,
 }: {
   user: User;
@@ -276,7 +264,7 @@ function Sidebar({
   onChange: (view: 'scheduled' | 'sent') => void;
   onCompose: () => void;
   onLogout: () => void;
-  scheduledCount: number;
+  queuedCount: number;
   sentCount: number;
 }) {
   const [profileOpen, setProfileOpen] = useState(false);
@@ -368,8 +356,8 @@ function Sidebar({
         <NavItem
           active={active === 'scheduled'}
           onClick={() => onChange('scheduled')}
-          label="Scheduled"
-          count={scheduledCount}
+          label="Queued"
+          count={queuedCount}
         />
 
         <NavItem
@@ -603,18 +591,15 @@ function EmailList({
 }
 
 function Compose({
-  senders,
   onClose,
   onDone,
 }: {
-  senders: Sender[];
   onClose: () => void;
   onDone: () => void;
 }) {
   const [recipients, setRecipients] = useState<string[]>([]);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
-  const [senderId, setSenderId] = useState(senders[0]?.id ?? '');
   const [start, setStart] = useState(
     new Date(Date.now() + 120000)
       .toISOString()
@@ -656,12 +641,6 @@ function Compose({
         );
       }
 
-      if (!senderId) {
-        throw new Error(
-          'Select a sender before scheduling.'
-        );
-      }
-
       await api('/api/campaigns', {
         method: 'POST',
         headers: {
@@ -672,7 +651,6 @@ function Compose({
           subject,
           body,
           recipients,
-          senderId,
           startTime: scheduledAt.toISOString(),
           delayMs: Number(delaySeconds) * 1000,
           hourlyLimit: Number(hourlyLimit),
@@ -774,41 +752,6 @@ function Compose({
             />
           </label>
 
-          <label className="mt-5 block text-xs font-semibold text-slate-600">
-            Sender
-
-            <select
-              className="mt-2 h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
-              value={senderId}
-              onChange={(event) =>
-                setSenderId(event.target.value)
-              }
-              disabled={!senders.length}
-            >
-              <option value="">
-                {senders.length
-                  ? 'Select a sender'
-                  : 'No sender available'}
-              </option>
-
-              {senders.map((sender) => (
-                <option key={sender.id} value={sender.id}>
-                  {sender.name
-                    ? `${sender.name} · `
-                    : ''}
-                  {sender.email}
-                </option>
-              ))}
-            </select>
-
-            {!senders.length && (
-              <span className="mt-2 block text-xs font-normal text-amber-700">
-                Configure a sender for your account before
-                scheduling.
-              </span>
-            )}
-          </label>
-
           <div className="mt-5 grid gap-4 sm:grid-cols-3">
             <label className="text-xs font-semibold text-slate-600">
               Schedule date and time
@@ -882,8 +825,7 @@ function Compose({
               busy ||
               !recipients.length ||
               !subject.trim() ||
-              !body.trim() ||
-              !senderId
+              !body.trim()
             }
             onClick={() => void submit()}
           >
