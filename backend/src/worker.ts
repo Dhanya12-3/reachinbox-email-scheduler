@@ -5,8 +5,7 @@ import { connection, EmailJob, enqueueEmail, QUEUE_NAME } from './queue';
 import { sendEmail } from './mailer';
 
 const prisma = new PrismaClient();
-const senderLockScript = `local current = redis.call('GET', KEYS[1]); local now = tonumber(ARGV[1]); local delay = tonumber(ARGV[2]); if current and tonumber(current) > now then return tonumber(current) - now end; redis.call('SET', KEYS[1], now + delay, 'PX', delay + 5000); return 0`;
-const hourCounterScript = `local current = tonumber(redis.call('GET', KEYS[1]) or '0'); local maximum = tonumber(ARGV[1]); if current >= maximum then return {0, current} end; local count = redis.call('INCR', KEYS[1]); if count == 1 then redis.call('EXPIRE', KEYS[1], 3700) end; return {1, count}`;
+const throttleScript = `local count = tonumber(redis.call('GET', KEYS[1]) or '0'); local maximum = tonumber(ARGV[1]); local now = tonumber(ARGV[1 + 1]); local spacingUntil = tonumber(redis.call('GET', KEYS[2]) or '0'); if count >= maximum then return {0, count, 0} end; if spacingUntil > now then return {-1, count, spacingUntil - now} end; local nextCount = redis.call('INCR', KEYS[1]); if nextCount == 1 then redis.call('EXPIRE', KEYS[1], 3700) end; local delay = tonumber(ARGV[3]); if delay > 0 then redis.call('SET', KEYS[2], now + delay, 'PX', delay + 5000) end; return {1, nextCount, 0}`;
 const releaseHourSlotScript = `local current = redis.call('GET', KEYS[1]); if not current then return 0 end; local remaining = redis.call('DECR', KEYS[1]); if remaining <= 0 then redis.call('DEL', KEYS[1]); return 0 end; return remaining`;
 
 type ThrottleResult = { wait: number; hourlyKey?: string };
@@ -31,22 +30,21 @@ async function markEligible(id: string) {
 async function throttle(sender: string, hourlyLimit: number): Promise<ThrottleResult> {
   const window = Math.floor(Date.now() / 3_600_000);
   const hourlyKey = `sender:v2:${sender}:hour:${window}`;
-  const result = await connection.eval(hourCounterScript, 1, hourlyKey, hourlyLimit) as [number | string, number | string];
-  const available = Number(result[0]) === 1;
+  const spacingKey = `sender:v2:${sender}:spacing`;
+  const now = Date.now();
+  const result = await connection.eval(throttleScript, 2, hourlyKey, spacingKey, hourlyLimit, now, env.MIN_SEND_DELAY_MS) as [number | string, number | string, number | string];
+  const decision = Number(result[0]);
   const count = Number(result[1]);
   console.log(`[THROTTLE] sender=${sender} count=${count} limit=${hourlyLimit}`);
-  if (!available) {
-    const wait = Math.max(1, (window + 1) * 3_600_000 - Date.now());
+  if (decision === 0) {
+    const wait = Math.max(1, (window + 1) * 3_600_000 + 1000 - now);
     console.log(`[THROTTLE] quota exhausted; next window in ${wait}ms`);
     return { wait };
   }
-  if (env.MIN_SEND_DELAY_MS > 0) {
-    const spacingWait = Number(await connection.eval(senderLockScript, 1, `sender:${sender}:spacing`, Date.now(), env.MIN_SEND_DELAY_MS));
-    if (spacingWait > 0) {
-      await releaseHourlyReservation(hourlyKey);
-      console.log(`[THROTTLE] sender=${sender} spacing wait=${spacingWait}ms`);
-      return { wait: spacingWait };
-    }
+  if (decision < 0) {
+    const wait = Math.max(1, Number(result[2]));
+    console.log(`[THROTTLE] sender=${sender} spacing wait=${wait}ms`);
+    return { wait };
   }
   console.log('[THROTTLE] quota available');
   return { wait: 0, hourlyKey };

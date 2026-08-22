@@ -252,6 +252,21 @@ app.get('/api/emails', async (req, res) => {
   res.json({ emails });
 });
 
+app.get('/api/emails/sent', async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+
+  const emails = await prisma.scheduledEmail.findMany({
+    where: { campaign: { userId: user.id }, status: 'SENT' },
+    include: { campaign: { select: { name: true } } },
+    orderBy: { sentAt: 'desc' },
+    take: 1000,
+  });
+
+  console.log(`[DEBUG] API SENT QUERY RESULT ids=${emails.map(email => email.id).join(',') || 'none'}`);
+  res.json({ emails });
+});
+
 app.post('/api/emails/schedule', async (req, res) => {
   const user = await requireUser(req, res);
   if (!user) return;
