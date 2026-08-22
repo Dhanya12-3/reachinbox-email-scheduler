@@ -6,6 +6,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { z } from 'zod';
 import env, { frontendOrigins } from './config';
 import { enqueueEmail } from './queue';
+import { startWorker } from './worker';
 
 const prisma = new PrismaClient();
 const app = express();
@@ -65,7 +66,7 @@ async function enqueueWithTimeout(emailId: string, sender: string, scheduledAt: 
   return Promise.race([
     enqueueEmail(emailId, sender, scheduledAt),
     new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Queue insertion timed out.')), 8000);
+      setTimeout(() => reject(new Error(`Queue insertion timed out after ${env.REDIS_CONNECT_TIMEOUT_MS}ms.`)), env.REDIS_CONNECT_TIMEOUT_MS + 1000);
     }),
   ]);
 }
@@ -392,5 +393,7 @@ async function reconcileMissingJobs() {
 
 app.listen(env.PORT, () => {
   console.log(`API listening on http://localhost:${env.PORT}`);
+  startWorker();
+  console.log('Email worker initialization requested in API process');
   void reconcileMissingJobs().catch((error: unknown) => console.error('Queue reconciliation unavailable:', error instanceof Error ? error.message : 'unknown error'));
 });

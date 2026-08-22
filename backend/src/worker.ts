@@ -1,7 +1,7 @@
-import { Worker, Job } from 'bullmq';
+import { Worker } from 'bullmq';
 import { PrismaClient } from '@prisma/client';
 import env from './config';
-import { connection, EmailJob, enqueueEmail } from './queue';
+import { connection, EmailJob, enqueueEmail, QUEUE_NAME } from './queue';
 import { sendEmail } from './mailer';
 
 const prisma = new PrismaClient();
@@ -22,7 +22,12 @@ async function throttle(sender: string, hourlyLimit: number) {
   return count === 0 ? (window + 1) * 3_600_000 + 1000 - Date.now() : 0;
 }
 
-const worker = new Worker<EmailJob>('email-delivery', async job => {
+let worker: Worker<EmailJob> | undefined;
+
+export function startWorker() {
+  if (worker) return worker;
+
+  worker = new Worker<EmailJob>(QUEUE_NAME, async job => {
   if (!(await claim(job.data.scheduledEmailId))) {
     const existing = await prisma.scheduledEmail.findUnique({ where: { id: job.data.scheduledEmailId }, select: { status: true } });
     if (existing?.status === 'SENT') console.log(`Skipping already sent email ${job.data.scheduledEmailId}`);
@@ -39,6 +44,9 @@ const worker = new Worker<EmailJob>('email-delivery', async job => {
     await prisma.scheduledEmail.update({ where: { id: job.data.scheduledEmailId }, data: { status: 'QUEUED', processingAt: null, error: error instanceof Error ? error.message : 'Unknown SMTP error' } });
     throw error;
   }
-}, { connection, concurrency: env.WORKER_CONCURRENCY, maxStalledCount: 1 });
-worker.on('ready', () => console.log(`Email worker started with concurrency ${env.WORKER_CONCURRENCY}`));
-worker.on('failed', async (job, error) => { console.error(`Email job failed after retry attempt ${job?.attemptsMade ?? 0}: ${error.message}`); if (job && job.attemptsMade >= 3) await prisma.scheduledEmail.update({ where: { id: job.data.scheduledEmailId }, data: { status: 'FAILED', processingAt: null, error: error.message } }); });
+  }, { connection, concurrency: env.WORKER_CONCURRENCY, maxStalledCount: 1 });
+  worker.on('ready', () => console.log(`Email worker ready on queue ${QUEUE_NAME} with concurrency ${env.WORKER_CONCURRENCY}`));
+  worker.on('error', error => console.error(`BullMQ worker error (${QUEUE_NAME}): ${error.message}`));
+  worker.on('failed', async (job, error) => { console.error(`Email job failed after retry attempt ${job?.attemptsMade ?? 0}: ${error.message}`); if (job && job.attemptsMade >= 3) await prisma.scheduledEmail.update({ where: { id: job.data.scheduledEmailId }, data: { status: 'FAILED', processingAt: null, error: error.message } }); });
+  return worker;
+}

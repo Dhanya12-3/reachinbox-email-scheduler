@@ -10,7 +10,8 @@ const env = z.object({
   GOOGLE_CLIENT_ID: z.string().optional(), GOOGLE_CLIENT_SECRET: z.string().optional(), GOOGLE_CALLBACK_URL: z.string().optional(),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
   MAX_EMAILS_PER_HOUR: z.coerce.number().int().positive().default(200),
-  MIN_SEND_DELAY_MS: z.coerce.number().int().nonnegative().default(2000)
+  MIN_SEND_DELAY_MS: z.coerce.number().int().nonnegative().default(2000),
+  REDIS_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(10000)
 }).parse(process.env);
 
 try {

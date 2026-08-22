@@ -2,8 +2,8 @@
   "name": "reachinbox-backend",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "worker": "tsx src/worker.ts",
-    "start": "node dist/index.js & node dist/worker.js",
+    "worker": "tsx src/worker-entry.ts",
+    "start": "node dist/index.js",
     "build": "tsc",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy"
