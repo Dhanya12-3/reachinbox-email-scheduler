@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+
+enum EmailStatus {
+  PENDING
+  QUEUED
+  PROCESSING
+  SENT
+  FAILED
+  CANCELLED
+  SCHEDULED
+}
+
+model User {
+  id String @id
+  googleId String? @unique
+  email String @unique
+  name String?
+  avatar String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  senders Sender[]
+  campaigns Campaign[]
+  sessions AuthSession[]
+  @@map("users")
+}
+
+model Sender {
+  id String @id
+  email String
+  name String?
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  campaigns Campaign[]
+  @@unique([userId, email])
+  @@index([userId])
+  @@map("senders")
+}
+
+model Campaign {
+  id String @id
+  name String
+  description String?
+  userId String
+  senderId String
+  delayMs Int @default(2000)
+  hourlyLimit Int @default(200)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sender Sender @relation(fields: [senderId], references: [id], onDelete: Restrict)
+  scheduledEmails ScheduledEmail[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([userId])
+  @@index([senderId])
+  @@map("campaigns")
+}
+
+model ScheduledEmail {
+  id String @id
+  campaignId String
+  recipientEmail String
+  subject String
+  body String
+  scheduledAt DateTime
+  status EmailStatus @default(QUEUED)
+  attempts Int @default(0)
+  sentAt DateTime?
+  error String?
+  bullJobId String? @unique
+  processingAt DateTime?
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([campaignId])
+  @@index([status, scheduledAt])
+  @@map("scheduled_emails")
+}
+
+model AuthSession {
+  id String @id
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([userId, expiresAt])
+  @@map("auth_sessions")
+}

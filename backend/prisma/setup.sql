@@ -1,0 +1,11 @@
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "googleId" TEXT;
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "avatar" TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS "users_googleId_key" ON "users"("googleId") WHERE "googleId" IS NOT NULL;
+ALTER TABLE "campaigns" ADD COLUMN IF NOT EXISTS "delayMs" INTEGER NOT NULL DEFAULT 2000;
+ALTER TABLE "campaigns" ADD COLUMN IF NOT EXISTS "hourlyLimit" INTEGER NOT NULL DEFAULT 200;
+ALTER TABLE "scheduled_emails" ADD COLUMN IF NOT EXISTS "processingAt" TIMESTAMP(3);
+ALTER TYPE "EmailStatus" ADD VALUE IF NOT EXISTS 'SCHEDULED';
+CREATE INDEX IF NOT EXISTS "scheduled_emails_status_scheduledAt_idx" ON "scheduled_emails"("status", "scheduledAt");
+DELETE FROM "auth_sessions" WHERE "userId" NOT IN (SELECT "id" FROM "users");
+ALTER TABLE "auth_sessions" DROP CONSTRAINT IF EXISTS "auth_sessions_userId_fkey";
+ALTER TABLE "auth_sessions" ADD CONSTRAINT "auth_sessions_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE;

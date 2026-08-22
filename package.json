@@ -1,0 +1,11 @@
+{
+  "name": "reachinbox-scheduler",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build",
+    "db:generate": "npm --prefix backend run db:generate",
+    "db:migrate": "npm --prefix backend run db:migrate"
+  },
+  "devDependencies": { "concurrently": "^9.1.2" }
+}
