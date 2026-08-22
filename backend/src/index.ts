@@ -290,13 +290,12 @@ app.post('/api/emails/schedule', async (req, res) => {
         subject: data.subject,
         body: data.body,
         scheduledAt,
-        status: 'PENDING',
+        status: 'SCHEDULED',
       },
     });
   });
 
   try {
-    await prisma.scheduledEmail.update({ where: { id: email.id }, data: { status: 'QUEUED' } });
     const job = await enqueueEmail(email.id, sender.email, scheduledAt);
     const saved = await prisma.scheduledEmail.update({ where: { id: email.id }, data: { bullJobId: job.id } });
     return res.status(201).json({ email: saved, jobId: job.id });
@@ -350,7 +349,7 @@ app.post('/api/campaigns', async (req, res) => {
           subject: data.subject,
           body: data.body,
           scheduledAt: new Date(start.getTime() + index * data.delayMs),
-          status: 'QUEUED',
+          status: 'SCHEDULED',
         },
       })
     ));
@@ -362,6 +361,7 @@ app.post('/api/campaigns', async (req, res) => {
     await Promise.all(campaign.emails.map(async email => {
       const job = await enqueueWithTimeout(email.id, sender.email, email.scheduledAt);
       await prisma.scheduledEmail.update({ where: { id: email.id }, data: { bullJobId: job.id } });
+      console.log(`Email scheduled: ${email.id} for ${email.scheduledAt.toISOString()}`);
     }));
   } catch (error) {
     console.error('Queue insertion failed; restart reconciliation will retry queued emails.', error instanceof Error ? error.message : 'unknown error');
@@ -376,18 +376,31 @@ async function reconcileMissingJobs() {
     data: { status: 'QUEUED', processingAt: null },
   });
 
-  const pending = await prisma.scheduledEmail.findMany({
-    where: { status: { in: ['QUEUED', 'PENDING'] }, bullJobId: null, scheduledAt: { gt: new Date() } },
+  const now = new Date();
+  await prisma.scheduledEmail.updateMany({
+    where: { status: { in: ['QUEUED', 'PENDING'] }, scheduledAt: { gt: now } },
+    data: { status: 'SCHEDULED' },
+  });
+
+  const missing = await prisma.scheduledEmail.findMany({
+    where: { status: { in: ['SCHEDULED', 'QUEUED', 'PENDING'] }, bullJobId: null },
     include: { campaign: { include: { sender: true } } },
   });
 
-  for (const email of pending) {
+  let reconciled = 0;
+  for (const email of missing) {
     const job = await enqueueEmail(email.id, email.campaign.sender.email, email.scheduledAt);
-    await prisma.scheduledEmail.update({ where: { id: email.id }, data: { status: 'QUEUED', bullJobId: job.id } });
+    const due = email.scheduledAt <= now;
+    await prisma.scheduledEmail.update({
+      where: { id: email.id },
+      data: { status: due ? 'QUEUED' : 'SCHEDULED', bullJobId: job.id },
+    });
+    if (due) console.log(`Email became eligible during reconciliation: ${email.id}`);
+    reconciled += 1;
   }
 
-  if (pending.length || stale.count) {
-    console.log(`Reconciled ${pending.length} missing jobs and ${stale.count} stale claims`);
+  if (reconciled || stale.count) {
+    console.log(`Reconciled ${reconciled} missing jobs and ${stale.count} stale claims`);
   }
 }
 

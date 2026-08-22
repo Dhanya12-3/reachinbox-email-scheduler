@@ -30,7 +30,7 @@ type Email = {
 const configuredApi = import.meta.env.VITE_API_URL?.trim();
 const API = (configuredApi || (import.meta.env.DEV ? 'http://localhost:4000' : window.location.origin)).replace(/\/$/, '');
 
-const scheduledStatuses = ['PENDING', 'PROCESSING', 'SCHEDULED'];
+const scheduledStatuses = ['SCHEDULED'];
 
 const formatTime = (value?: string | null) =>
   value
@@ -119,7 +119,7 @@ export default function App() {
           view === 'sent'
             ? ['SENT', 'FAILED'].includes(email.status)
             : view === 'queued'
-              ? email.status === 'QUEUED'
+              ? ['QUEUED', 'PROCESSING'].includes(email.status)
               : scheduledStatuses.includes(email.status);
 
         const query = search.toLowerCase();
@@ -147,7 +147,7 @@ export default function App() {
   };
 
   const queuedCount = emails.filter((email) =>
-    email.status === 'QUEUED'
+    ['QUEUED', 'PROCESSING'].includes(email.status)
   ).length;
 
   const scheduledCount = emails.filter((email) =>
