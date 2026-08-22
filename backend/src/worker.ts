@@ -6,7 +6,7 @@ import { sendEmail } from './mailer';
 
 const prisma = new PrismaClient();
 const senderLockScript = `local current = redis.call('GET', KEYS[1]); local now = tonumber(ARGV[1]); local delay = tonumber(ARGV[2]); if current and tonumber(current) > now then return tonumber(current) - now end; redis.call('SET', KEYS[1], now + delay, 'PX', delay + 5000); return 0`;
-const hourCounterScript = `local current = tonumber(redis.call('GET', KEYS[1]) or '0'); local maximum = tonumber(ARGV[1]); if current >= maximum then return 0 end; local count = redis.call('INCR', KEYS[1]); if count == 1 then redis.call('EXPIRE', KEYS[1], 3700) end; return count`;
+const hourCounterScript = `local current = tonumber(redis.call('GET', KEYS[1]) or '0'); local maximum = tonumber(ARGV[1]); if current >= maximum then return {0, current} end; local count = redis.call('INCR', KEYS[1]); if count == 1 then redis.call('EXPIRE', KEYS[1], 3700) end; return {1, count}`;
 const releaseHourSlotScript = `local current = redis.call('GET', KEYS[1]); if not current then return 0 end; local remaining = redis.call('DECR', KEYS[1]); if remaining <= 0 then redis.call('DEL', KEYS[1]); return 0 end; return remaining`;
 
 type ThrottleResult = { wait: number; hourlyKey?: string };
@@ -26,13 +26,23 @@ async function throttle(sender: string, hourlyLimit: number): Promise<ThrottleRe
   const window = Math.floor(Date.now() / 3_600_000);
   if (env.MIN_SEND_DELAY_MS > 0) {
     const spacingWait = Number(await connection.eval(senderLockScript, 1, `sender:${sender}:spacing`, Date.now(), env.MIN_SEND_DELAY_MS));
-    if (spacingWait > 0) return { wait: spacingWait };
+    if (spacingWait > 0) {
+      console.log(`[THROTTLE] sender=${sender} spacing wait=${spacingWait}ms`);
+      return { wait: spacingWait };
+    }
   }
-  const hourlyKey = `sender:${sender}:hour:${window}`;
-  const count = Number(await connection.eval(hourCounterScript, 1, hourlyKey, hourlyLimit));
-  return count === 0
-    ? { wait: (window + 1) * 3_600_000 + 1000 - Date.now() }
-    : { wait: 0, hourlyKey };
+  const hourlyKey = `sender:v2:${sender}:hour:${window}`;
+  const result = await connection.eval(hourCounterScript, 1, hourlyKey, hourlyLimit) as [number | string, number | string];
+  const available = Number(result[0]) === 1;
+  const count = Number(result[1]);
+  console.log(`[THROTTLE] sender=${sender} count=${count} limit=${hourlyLimit}`);
+  if (!available) {
+    const wait = Math.max(1, (window + 1) * 3_600_000 - Date.now());
+    console.log(`[THROTTLE] quota exhausted; next window in ${wait}ms`);
+    return { wait };
+  }
+  console.log('[THROTTLE] quota available');
+  return { wait: 0, hourlyKey };
 }
 
 async function releaseHourlyReservation(hourlyKey: string) {
@@ -65,15 +75,16 @@ export function startWorker() {
       console.log(`Email waiting because hourly limit or throttling was reached: ${email.id}`);
       return;
     }
-    console.log(`Email sending: ${email.id}`);
+    console.log(`[EMAIL] sending ${email.id}`);
     const preview = await sendEmail({ id: email.id, recipient: email.recipientEmail, sender: job.data.sender, subject: email.subject, body: email.body });
     deliverySucceeded = true;
     await prisma.scheduledEmail.update({ where: { id: email.id }, data: { status: 'SENT', sentAt: new Date(), processingAt: null, error: null } });
+    console.log(`[EMAIL] sent successfully ${email.id}`);
     console.log(`Email sent to ${email.recipientEmail}${preview ? `; Preview: ${preview}` : ''}`);
   } catch (error) {
     if (hourlyReservationKey && !deliverySucceeded) await releaseHourlyReservation(hourlyReservationKey);
     await prisma.scheduledEmail.update({ where: { id: job.data.scheduledEmailId }, data: { status: 'QUEUED', processingAt: null, error: error instanceof Error ? error.message : 'Unknown SMTP error' } });
-    console.error(`Email failed and will retry: ${job.data.scheduledEmailId}`);
+    console.error(`[EMAIL] delivery failed ${job.data.scheduledEmailId}`);
     throw error;
   }
   }, { connection, concurrency: env.WORKER_CONCURRENCY, maxStalledCount: 1 });
@@ -81,9 +92,10 @@ export function startWorker() {
   worker.on('error', error => console.error(`BullMQ worker error (${QUEUE_NAME}): ${error.message}`));
   worker.on('failed', async (job, error) => {
     console.error(`Email job failed after retry attempt ${job?.attemptsMade ?? 0}: ${error.message}`);
+    if (job && job.attemptsMade < 3) console.log(`[EMAIL] retry scheduled ${job.data.scheduledEmailId}`);
     if (job && job.attemptsMade >= 3) {
       await prisma.scheduledEmail.update({ where: { id: job.data.scheduledEmailId }, data: { status: 'FAILED', processingAt: null, error: error.message } });
-      console.error(`Email failed permanently: ${job.data.scheduledEmailId}`);
+      console.error(`[EMAIL] permanently failed ${job.data.scheduledEmailId}`);
     }
   });
   return worker;
