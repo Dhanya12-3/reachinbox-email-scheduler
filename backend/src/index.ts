@@ -61,6 +61,27 @@ function setSession(response: express.Response, token: string) {
   response.setHeader('Set-Cookie', `${sessionCookie}=${token}; HttpOnly; ${sameSite}; Path=/; Max-Age=604800`);
 }
 
+async function resolveSender(user: { id: string; email: string }, senderId?: string) {
+  if (senderId) {
+    return prisma.sender.findFirst({ where: { id: senderId, userId: user.id } });
+  }
+
+  const existing = await prisma.sender.findFirst({
+    where: { userId: user.id },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  return existing ?? prisma.sender.upsert({
+    where: { userId_email: { userId: user.id, email: user.email.toLowerCase() } },
+    update: {},
+    create: {
+      id: crypto.randomUUID(),
+      email: user.email.toLowerCase(),
+      userId: user.id,
+    },
+  });
+}
+
 app.get('/', (_req, res) => res.json({ name: 'ReachInbox Email Scheduler API', dashboard: env.FRONTEND_URL, health: '/api/health' }));
 app.get('/health', (_req, res) => res.redirect('/api/health'));
 app.get('/api/health', async (_req, res) => {
@@ -240,9 +261,7 @@ app.post('/api/emails/schedule', async (req, res) => {
     return res.status(400).json({ error: 'scheduledAt must be in the future.' });
   }
 
-  const sender = data.senderId
-    ? await prisma.sender.findFirst({ where: { id: data.senderId, userId: user.id } })
-    : await prisma.sender.findFirst({ where: { userId: user.id }, orderBy: { createdAt: 'asc' } });
+  const sender = await resolveSender(user, data.senderId);
 
   if (!sender) {
     return res.status(400).json({ error: 'Create or select a sender before scheduling an email.' });
@@ -296,9 +315,7 @@ app.post('/api/campaigns', async (req, res) => {
   }
 
   const recipients = [...new Set(data.recipients.map(email => email.toLowerCase()))];
-  const sender = data.senderId
-    ? await prisma.sender.findFirst({ where: { id: data.senderId, userId: user.id } })
-    : await prisma.sender.findFirst({ where: { userId: user.id }, orderBy: { createdAt: 'asc' } });
+  const sender = await resolveSender(user, data.senderId);
   if (!sender) return res.status(400).json({ error: 'Create a sender before scheduling.' });
 
   const campaign = await prisma.$transaction(async tx => {
