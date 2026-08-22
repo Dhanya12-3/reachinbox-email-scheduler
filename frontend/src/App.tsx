@@ -90,6 +90,8 @@ export default function App() {
 
       setUser(me.user);
       setEmails(emailData.emails);
+      const sentEmails = emailData.emails.filter((email: Email) => email.status === 'SENT');
+      console.log(`[DEBUG] FRONTEND SENT DATA ids=${sentEmails.map((email: Email) => email.id).join(',') || 'none'}`);
       setError('');
     } catch (reason) {
       setError(
@@ -117,7 +119,7 @@ export default function App() {
       emails.filter((email) => {
         const matchesView =
           view === 'sent'
-            ? ['SENT', 'FAILED'].includes(email.status)
+            ? email.status === 'SENT'
             : view === 'queued'
               ? ['QUEUED', 'PROCESSING'].includes(email.status)
               : scheduledStatuses.includes(email.status);
@@ -155,7 +157,7 @@ export default function App() {
   ).length;
 
   const sentCount = emails.filter((email) =>
-    ['SENT', 'FAILED'].includes(email.status)
+    email.status === 'SENT'
   ).length;
 
   return (

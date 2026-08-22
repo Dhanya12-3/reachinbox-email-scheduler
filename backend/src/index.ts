@@ -246,6 +246,9 @@ app.get('/api/emails', async (req, res) => {
     take: 1000,
   });
 
+  const sentIds = emails.filter(email => email.status === 'SENT').map(email => email.id);
+  console.log(`[DEBUG] API SENT QUERY RESULT ids=${sentIds.join(',') || 'none'}`);
+
   res.json({ emails });
 });
 

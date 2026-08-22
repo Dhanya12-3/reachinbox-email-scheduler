@@ -16,21 +16,20 @@ async function claim(id: string) {
     where: {
       id,
       scheduledAt: { lte: new Date() },
-      status: { in: ['SCHEDULED', 'QUEUED'] },
+      status: 'QUEUED',
     },
     data: { status: 'PROCESSING', processingAt: new Date(), attempts: { increment: 1 } },
   });
   return result.count === 1;
 }
+async function markEligible(id: string) {
+  await prisma.scheduledEmail.updateMany({
+    where: { id, scheduledAt: { lte: new Date() }, status: 'SCHEDULED' },
+    data: { status: 'QUEUED' },
+  });
+}
 async function throttle(sender: string, hourlyLimit: number): Promise<ThrottleResult> {
   const window = Math.floor(Date.now() / 3_600_000);
-  if (env.MIN_SEND_DELAY_MS > 0) {
-    const spacingWait = Number(await connection.eval(senderLockScript, 1, `sender:${sender}:spacing`, Date.now(), env.MIN_SEND_DELAY_MS));
-    if (spacingWait > 0) {
-      console.log(`[THROTTLE] sender=${sender} spacing wait=${spacingWait}ms`);
-      return { wait: spacingWait };
-    }
-  }
   const hourlyKey = `sender:v2:${sender}:hour:${window}`;
   const result = await connection.eval(hourCounterScript, 1, hourlyKey, hourlyLimit) as [number | string, number | string];
   const available = Number(result[0]) === 1;
@@ -40,6 +39,14 @@ async function throttle(sender: string, hourlyLimit: number): Promise<ThrottleRe
     const wait = Math.max(1, (window + 1) * 3_600_000 - Date.now());
     console.log(`[THROTTLE] quota exhausted; next window in ${wait}ms`);
     return { wait };
+  }
+  if (env.MIN_SEND_DELAY_MS > 0) {
+    const spacingWait = Number(await connection.eval(senderLockScript, 1, `sender:${sender}:spacing`, Date.now(), env.MIN_SEND_DELAY_MS));
+    if (spacingWait > 0) {
+      await releaseHourlyReservation(hourlyKey);
+      console.log(`[THROTTLE] sender=${sender} spacing wait=${spacingWait}ms`);
+      return { wait: spacingWait };
+    }
   }
   console.log('[THROTTLE] quota available');
   return { wait: 0, hourlyKey };
@@ -55,11 +62,17 @@ export function startWorker() {
   if (worker) return worker;
 
   worker = new Worker<EmailJob>(QUEUE_NAME, async job => {
+  console.log(`[DEBUG] JOB RECEIVED ${job.data.scheduledEmailId}`);
+  const beforeClaim = await prisma.scheduledEmail.findUnique({ where: { id: job.data.scheduledEmailId }, select: { status: true } });
+  console.log(`[DEBUG] CURRENT DB STATUS ${job.data.scheduledEmailId} = ${beforeClaim?.status ?? 'MISSING'}`);
+  await markEligible(job.data.scheduledEmailId);
   if (!(await claim(job.data.scheduledEmailId))) {
+    console.log(`[DEBUG] CLAIM RESULT ${job.data.scheduledEmailId} = false`);
     const existing = await prisma.scheduledEmail.findUnique({ where: { id: job.data.scheduledEmailId }, select: { status: true } });
     if (existing?.status === 'SENT') console.log(`Skipping already sent email ${job.data.scheduledEmailId}`);
     return;
   }
+  console.log(`[DEBUG] CLAIM RESULT ${job.data.scheduledEmailId} = true`);
   console.log(`Email became eligible: ${job.data.scheduledEmailId}`);
   console.log(`Email processing: ${job.data.scheduledEmailId}`);
   let hourlyReservationKey: string | undefined;
@@ -68,21 +81,30 @@ export function startWorker() {
     const email = await prisma.scheduledEmail.findUniqueOrThrow({ where: { id: job.data.scheduledEmailId }, include: { campaign: true } });
     const throttleResult = await throttle(job.data.sender, email.campaign.hourlyLimit);
     hourlyReservationKey = throttleResult.hourlyKey;
+    console.log(`[DEBUG] THROTTLE RESULT ${email.id} = ${throttleResult.wait}`);
     if (throttleResult.wait > 0) {
       await prisma.scheduledEmail.update({ where: { id: email.id }, data: { status: 'QUEUED', processingAt: null } });
-      const retryJob = await enqueueEmail(email.id, job.data.sender, new Date(Date.now() + throttleResult.wait), `:retry:${Date.now()}`);
+      const retryAt = new Date(Date.now() + throttleResult.wait);
+      const retryJob = await enqueueEmail(email.id, job.data.sender, retryAt, `:retry:${Date.now()}`);
       await prisma.scheduledEmail.update({ where: { id: email.id }, data: { bullJobId: retryJob.id } });
       console.log(`Email waiting because hourly limit or throttling was reached: ${email.id}`);
+      console.log(`[DEBUG] retry scheduled ${email.id} for ${retryAt.toISOString()}`);
       return;
     }
+    console.log(`[DEBUG] ABOUT TO CALL sendEmail ${email.id}`);
     console.log(`[EMAIL] sending ${email.id}`);
     const preview = await sendEmail({ id: email.id, recipient: email.recipientEmail, sender: job.data.sender, subject: email.subject, body: email.body });
     deliverySucceeded = true;
+    console.log(`[DEBUG] sendEmail RESULT ${email.id} = SUCCESS`);
+    console.log(`[DEBUG] ABOUT TO UPDATE DB TO SENT ${email.id}`);
     await prisma.scheduledEmail.update({ where: { id: email.id }, data: { status: 'SENT', sentAt: new Date(), processingAt: null, error: null } });
+    const afterUpdate = await prisma.scheduledEmail.findUnique({ where: { id: email.id }, select: { status: true } });
+    console.log(`[DEBUG] DB STATUS AFTER UPDATE ${email.id} = ${afterUpdate?.status ?? 'MISSING'}`);
     console.log(`[EMAIL] sent successfully ${email.id}`);
     console.log(`Email sent to ${email.recipientEmail}${preview ? `; Preview: ${preview}` : ''}`);
   } catch (error) {
     if (hourlyReservationKey && !deliverySucceeded) await releaseHourlyReservation(hourlyReservationKey);
+    console.error(`[DEBUG] sendEmail RESULT ${job.data.scheduledEmailId} = ERROR: ${error instanceof Error ? error.message : String(error)}`);
     await prisma.scheduledEmail.update({ where: { id: job.data.scheduledEmailId }, data: { status: 'QUEUED', processingAt: null, error: error instanceof Error ? error.message : 'Unknown SMTP error' } });
     console.error(`[EMAIL] delivery failed ${job.data.scheduledEmailId}`);
     throw error;
