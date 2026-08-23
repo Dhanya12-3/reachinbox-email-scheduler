@@ -321,7 +321,7 @@ app.post('/api/emails/schedule', async (req, res) => {
       where: { id: email.id },
       data: { status: 'SCHEDULED', error: error instanceof Error ? error.message : 'Queue unavailable' },
     });
-    return res.status(503).json({ error: 'Email was stored but could not be queued. Retry after Redis is available.', emailId: email.id });
+    return res.status(503).json({ error: 'Email was stored but could not be scheduled. Retry after Redis is available.', emailId: email.id });
   }
 });
 
@@ -380,7 +380,7 @@ app.post('/api/campaigns', async (req, res) => {
       console.log(`Email scheduled: ${email.id} for ${email.scheduledAt.toISOString()}`);
     }));
   } catch (error) {
-    console.error('Queue insertion failed; restart reconciliation will retry queued emails.', error instanceof Error ? error.message : 'unknown error');
+    console.error('Queue insertion failed; restart reconciliation will retry scheduled emails.', error instanceof Error ? error.message : 'unknown error');
   }
 
   res.status(201).json({ campaign: campaign.record, count: campaign.emails.length });
