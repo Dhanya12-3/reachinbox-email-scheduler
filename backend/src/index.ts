@@ -26,7 +26,6 @@ const scheduleSchema = z.object({
   senderId: z.string().optional(),
   startTime: z.string().datetime(),
   delayMs: z.number().int().min(0).max(86_400_000).default(env.MIN_SEND_DELAY_MS),
-  hourlyLimit: z.number().int().positive().max(10000).default(env.MAX_EMAILS_PER_HOUR),
 });
 
 function cookieValue(request: express.Request, name: string) {
@@ -297,7 +296,7 @@ app.post('/api/emails/schedule', async (req, res) => {
 
   const email = await prisma.$transaction(async tx => {
     const campaign = await tx.campaign.create({
-      data: { id: crypto.randomUUID(), name: data.subject, description: data.body, userId: user.id, senderId: sender.id, delayMs: env.MIN_SEND_DELAY_MS, hourlyLimit: env.MAX_EMAILS_PER_HOUR },
+      data: { id: crypto.randomUUID(), name: data.subject, description: data.body, userId: user.id, senderId: sender.id, delayMs: env.MIN_SEND_DELAY_MS },
     });
 
     return tx.scheduledEmail.create({
@@ -320,7 +319,7 @@ app.post('/api/emails/schedule', async (req, res) => {
   } catch (error) {
     await prisma.scheduledEmail.update({
       where: { id: email.id },
-      data: { status: 'PENDING', error: error instanceof Error ? error.message : 'Queue unavailable' },
+      data: { status: 'SCHEDULED', error: error instanceof Error ? error.message : 'Queue unavailable' },
     });
     return res.status(503).json({ error: 'Email was stored but could not be queued. Retry after Redis is available.', emailId: email.id });
   }
@@ -354,7 +353,6 @@ app.post('/api/campaigns', async (req, res) => {
         userId: user.id,
         senderId: sender.id,
         delayMs: data.delayMs,
-        hourlyLimit: data.hourlyLimit,
       },
     });
 
@@ -391,29 +389,21 @@ app.post('/api/campaigns', async (req, res) => {
 async function reconcileMissingJobs() {
   const stale = await prisma.scheduledEmail.updateMany({
     where: { status: 'PROCESSING', processingAt: { lt: new Date(Date.now() - 15 * 60_000) } },
-    data: { status: 'QUEUED', processingAt: null },
-  });
-
-  const now = new Date();
-  await prisma.scheduledEmail.updateMany({
-    where: { status: { in: ['QUEUED', 'PENDING'] }, scheduledAt: { gt: now } },
-    data: { status: 'SCHEDULED' },
+    data: { status: 'SCHEDULED', processingAt: null },
   });
 
   const missing = await prisma.scheduledEmail.findMany({
-    where: { status: { in: ['SCHEDULED', 'QUEUED', 'PENDING'] }, bullJobId: null },
+    where: { status: 'SCHEDULED', bullJobId: null },
     include: { campaign: { include: { sender: true } } },
   });
 
   let reconciled = 0;
   for (const email of missing) {
     const job = await enqueueEmail(email.id, email.campaign.sender.email, email.scheduledAt);
-    const due = email.scheduledAt <= now;
     await prisma.scheduledEmail.update({
       where: { id: email.id },
-      data: { status: due ? 'QUEUED' : 'SCHEDULED', bullJobId: job.id },
+      data: { bullJobId: job.id },
     });
-    if (due) console.log(`Email became eligible during reconciliation: ${email.id}`);
     reconciled += 1;
   }
 

@@ -71,7 +71,7 @@ const buttonBase =
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [emails, setEmails] = useState<Email[]>([]);
-  const [view, setView] = useState<'queued' | 'scheduled' | 'sent'>('queued');
+  const [view, setView] = useState<'scheduled' | 'sent'>('scheduled');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -120,9 +120,7 @@ export default function App() {
         const matchesView =
           view === 'sent'
             ? email.status === 'SENT'
-            : view === 'queued'
-              ? ['QUEUED', 'PROCESSING'].includes(email.status)
-              : scheduledStatuses.includes(email.status);
+            : scheduledStatuses.includes(email.status);
 
         const query = search.toLowerCase();
 
@@ -148,10 +146,6 @@ export default function App() {
     setUser(null);
   };
 
-  const queuedCount = emails.filter((email) =>
-    ['QUEUED', 'PROCESSING'].includes(email.status)
-  ).length;
-
   const scheduledCount = emails.filter((email) =>
     scheduledStatuses.includes(email.status)
   ).length;
@@ -168,7 +162,6 @@ export default function App() {
         onChange={setView}
         onCompose={() => setComposeOpen(true)}
         onLogout={() => void logout()}
-        queuedCount={queuedCount}
         scheduledCount={scheduledCount}
         sentCount={sentCount}
       />
@@ -215,19 +208,13 @@ export default function App() {
             </p>
 
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-              {view === 'queued'
-                ? 'Queued emails'
-                : view === 'scheduled'
-                  ? 'Scheduled emails'
-                  : 'Sent emails'}
+              {view === 'scheduled' ? 'Scheduled emails' : 'Sent emails'}
             </h1>
 
             <p className="mt-2 text-sm text-slate-500">
               {view === 'sent'
                 ? 'Review messages delivered through your workspace.'
-                : view === 'queued'
-                  ? 'Messages waiting to be sent.'
-                  : 'Keep track of upcoming scheduled messages.'}
+                : 'Keep track of upcoming scheduled messages.'}
             </p>
           </div>
 
@@ -264,16 +251,14 @@ function Sidebar({
   onChange,
   onCompose,
   onLogout,
-  queuedCount,
   scheduledCount,
   sentCount,
 }: {
   user: User;
-  active: 'queued' | 'scheduled' | 'sent';
-  onChange: (view: 'queued' | 'scheduled' | 'sent') => void;
+  active: 'scheduled' | 'sent';
+  onChange: (view: 'scheduled' | 'sent') => void;
   onCompose: () => void;
   onLogout: () => void;
-  queuedCount: number;
   scheduledCount: number;
   sentCount: number;
 }) {
@@ -362,13 +347,6 @@ function Sidebar({
           <Plus size={16} />
           Compose
         </button>
-
-        <NavItem
-          active={active === 'queued'}
-          onClick={() => onChange('queued')}
-          label="Queued"
-          count={queuedCount}
-        />
 
         <NavItem
           active={active === 'scheduled'}
@@ -530,7 +508,7 @@ function EmailList({
   loading,
 }: {
   rows: Email[];
-  view: 'queued' | 'scheduled' | 'sent';
+  view: 'scheduled' | 'sent';
   loading: boolean;
 }) {
   return (
@@ -589,9 +567,7 @@ function EmailList({
                     : 'bg-slate-100 text-slate-600'
                 }`}
               >
-                {row.status === 'QUEUED'
-                  ? 'Queued'
-                  : row.status === 'PROCESSING'
+                {row.status === 'PROCESSING'
                   ? 'Sending'
                   : row.status === 'FAILED'
                   ? 'Failed'
@@ -623,7 +599,6 @@ function Compose({
       .slice(0, 16)
   );
   const [delaySeconds, setDelaySeconds] = useState('2');
-  const [hourlyLimit, setHourlyLimit] = useState('200');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -670,7 +645,6 @@ function Compose({
           recipients,
           startTime: scheduledAt.toISOString(),
           delayMs: Number(delaySeconds) * 1000,
-          hourlyLimit: Number(hourlyLimit),
         }),
       });
 
@@ -769,7 +743,7 @@ function Compose({
             />
           </label>
 
-          <div className="mt-5 grid gap-4 sm:grid-cols-3">
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <label className="text-xs font-semibold text-slate-600">
               Schedule date and time
 
@@ -799,24 +773,6 @@ function Compose({
 
               <span className="mt-1 block text-[11px] font-normal text-slate-400">
                 seconds
-              </span>
-            </label>
-
-            <label className="text-xs font-semibold text-slate-600">
-              Hourly email limit
-
-              <input
-                className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
-                type="number"
-                min="1"
-                value={hourlyLimit}
-                onChange={(event) =>
-                  setHourlyLimit(event.target.value)
-                }
-              />
-
-              <span className="mt-1 block text-[11px] font-normal text-slate-400">
-                emails/hour
               </span>
             </label>
           </div>

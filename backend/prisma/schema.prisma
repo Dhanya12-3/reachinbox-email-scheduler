@@ -9,7 +9,6 @@ datasource db {
 
 enum EmailStatus {
   PENDING
-  QUEUED
   PROCESSING
   SENT
   FAILED
@@ -52,7 +51,6 @@ model Campaign {
   userId String
   senderId String
   delayMs Int @default(2000)
-  hourlyLimit Int @default(200)
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   sender Sender @relation(fields: [senderId], references: [id], onDelete: Restrict)
   scheduledEmails ScheduledEmail[]
@@ -70,7 +68,7 @@ model ScheduledEmail {
   subject String
   body String
   scheduledAt DateTime
-  status EmailStatus @default(QUEUED)
+  status EmailStatus @default(SCHEDULED)
   attempts Int @default(0)
   sentAt DateTime?
   error String?
