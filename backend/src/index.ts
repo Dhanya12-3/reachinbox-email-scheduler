@@ -95,10 +95,11 @@ app.get('/', (_req, res) => res.json({ name: 'ReachInbox Email Scheduler API', d
 app.get('/health', (_req, res) => res.redirect('/api/health'));
 app.get('/api/health', async (_req, res) => {
   try {
-    await prisma.$queryRaw`SELECT 1`;
+    await prisma.$queryRaw`SELECT 1 FROM "scheduled_emails" LIMIT 1`;
     res.json({ ok: true, database: 'connected' });
   } catch {
-    res.status(503).json({ ok: false, database: 'unavailable' });
+    console.error('[API] database schema check failed');
+    res.status(503).json({ ok: false, database: 'schema unavailable' });
   }
 });
 
@@ -238,32 +239,38 @@ app.get('/api/emails', async (req, res) => {
   const user = await requireUser(req, res);
   if (!user) return;
 
-  const emails = await prisma.scheduledEmail.findMany({
-    where: { campaign: { userId: user.id } },
-    include: { campaign: { select: { name: true } } },
-    orderBy: { scheduledAt: 'asc' },
-    take: 1000,
-  });
+  try {
+    const emails = await prisma.scheduledEmail.findMany({
+      where: { campaign: { userId: user.id } },
+      include: { campaign: { select: { name: true } } },
+      orderBy: { scheduledAt: 'asc' },
+      take: 1000,
+    });
 
-  const sentIds = emails.filter(email => email.status === 'SENT').map(email => email.id);
-  console.log(`[DEBUG] API SENT QUERY RESULT ids=${sentIds.join(',') || 'none'}`);
-
-  res.json({ emails });
+    res.json({ emails });
+  } catch (error) {
+    console.error(`[API] /api/emails failed: ${error instanceof Error ? error.message : String(error)}`);
+    res.status(503).json({ error: 'Email storage is not ready. Apply the latest database migrations and redeploy.' });
+  }
 });
 
 app.get('/api/emails/sent', async (req, res) => {
   const user = await requireUser(req, res);
   if (!user) return;
 
-  const emails = await prisma.scheduledEmail.findMany({
-    where: { campaign: { userId: user.id }, status: 'SENT' },
-    include: { campaign: { select: { name: true } } },
-    orderBy: { sentAt: 'desc' },
-    take: 1000,
-  });
+  try {
+    const emails = await prisma.scheduledEmail.findMany({
+      where: { campaign: { userId: user.id }, status: 'SENT' },
+      include: { campaign: { select: { name: true } } },
+      orderBy: { sentAt: 'desc' },
+      take: 1000,
+    });
 
-  console.log(`[DEBUG] API SENT QUERY RESULT ids=${emails.map(email => email.id).join(',') || 'none'}`);
-  res.json({ emails });
+    res.json({ emails });
+  } catch (error) {
+    console.error(`[API] /api/emails/sent failed: ${error instanceof Error ? error.message : String(error)}`);
+    res.status(503).json({ error: 'Email storage is not ready. Apply the latest database migrations and redeploy.' });
+  }
 });
 
 app.post('/api/emails/schedule', async (req, res) => {
@@ -389,7 +396,6 @@ app.post('/api/campaigns', async (req, res) => {
 async function reconcileMissingJobs() {
   const missing = await prisma.scheduledEmail.findMany({
     where: { status: 'SCHEDULED', bullJobId: null },
-    include: { campaign: { include: { sender: true } } },
   });
 
   let reconciled = 0;
@@ -412,4 +418,12 @@ app.listen(env.PORT, () => {
   startWorker();
   console.log('Email worker initialization requested in API process');
   void reconcileMissingJobs().catch((error: unknown) => console.error('Queue reconciliation unavailable:', error instanceof Error ? error.message : 'unknown error'));
+});
+
+app.use((error: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (res.headersSent) return next(error);
+
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[API] unhandled request error: ${message}`);
+  res.status(500).json({ error: 'Internal server error.' });
 });

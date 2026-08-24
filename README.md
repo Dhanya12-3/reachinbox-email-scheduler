@@ -18,6 +18,8 @@ The API authenticates a user, validates sender ownership, creates Campaign and S
 
 `db:migrate` runs `prisma migrate deploy`, including the additive production schema migration. It never resets or deletes production data.
 
+If Render reports `P3009` or says that migrations exist in the database but not locally, stop the deploy and reconcile the migration history before retrying. Compare the database's `_prisma_migrations` rows with this repository, then use `prisma migrate resolve --applied <migration-name>` only for migrations already verified as applied. Do not run `prisma migrate reset` against the production database.
+
 ## Render deployment
 
 Use these commands for the backend web service:
