@@ -597,7 +597,8 @@ function Compose({
       .toISOString()
       .slice(0, 16)
   );
-  const [delaySeconds, setDelaySeconds] = useState('2');
+    const [delaySeconds, setDelaySeconds] = useState('2');
+    const [hourlyLimit, setHourlyLimit] = useState('200');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -775,6 +776,22 @@ function Compose({
               </span>
             </label>
 
+              <label className="text-xs font-semibold text-slate-600">
+                Daily hour limit
+
+                <input
+                  className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={hourlyLimit}
+                  onChange={(event) => setHourlyLimit(event.target.value)}
+                />
+
+                <span className="mt-1 block text-[11px] font-normal text-slate-400">
+                  messages per hour
+                </span>
+              </label>
           </div>
 
           {message && (
