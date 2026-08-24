@@ -241,7 +241,10 @@ app.get('/api/emails', async (req, res) => {
 
   try {
     const emails = await prisma.scheduledEmail.findMany({
-      where: { campaign: { userId: user.id } },
+      where: {
+        campaign: { userId: user.id },
+        status: { in: ['SCHEDULED', 'SENT'] },
+      },
       include: { campaign: { select: { name: true } } },
       orderBy: { scheduledAt: 'asc' },
       take: 1000,
