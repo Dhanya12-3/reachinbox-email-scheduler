@@ -8,12 +8,9 @@ datasource db {
 }
 
 enum EmailStatus {
-  PENDING
-  PROCESSING
+  SCHEDULED
   SENT
   FAILED
-  CANCELLED
-  SCHEDULED
 }
 
 model User {

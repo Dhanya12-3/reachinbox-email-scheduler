@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ChevronDown,
+  CalendarClock,
   Filter,
+  Inbox,
   Mail,
+  MailCheck,
   Plus,
   RefreshCw,
   Search,
@@ -71,6 +74,7 @@ const buttonBase =
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [emails, setEmails] = useState<Email[]>([]);
+  const [sentEmails, setSentEmails] = useState<Email[]>([]);
   const [view, setView] = useState<'scheduled' | 'sent'>('scheduled');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -86,12 +90,15 @@ export default function App() {
         return;
       }
 
-      const emailData = await api('/api/emails');
+      const [emailData, sentData] = await Promise.all([
+        api('/api/emails'),
+        api('/api/emails/sent'),
+      ]);
 
       setUser(me.user);
       setEmails(emailData.emails);
-      const sentEmails = emailData.emails.filter((email: Email) => email.status === 'SENT');
-      console.log(`[DEBUG] FRONTEND SENT DATA ids=${sentEmails.map((email: Email) => email.id).join(',') || 'none'}`);
+      setSentEmails(sentData.emails);
+      console.log(`[DEBUG] FRONTEND SENT DATA ids=${sentData.emails.map((email: Email) => email.id).join(',') || 'none'}`);
       setError('');
     } catch (reason) {
       setError(
@@ -116,7 +123,7 @@ export default function App() {
 
   const visible = useMemo(
     () =>
-      emails.filter((email) => {
+      (view === 'sent' ? sentEmails : emails).filter((email) => {
         const matchesView =
           view === 'sent'
             ? email.status === 'SENT'
@@ -131,7 +138,7 @@ export default function App() {
             email.subject.toLowerCase().includes(query))
         );
       }),
-    [emails, search, view]
+    [emails, search, sentEmails, view]
   );
 
   if (!user) {
@@ -150,9 +157,7 @@ export default function App() {
     scheduledStatuses.includes(email.status)
   ).length;
 
-  const sentCount = emails.filter((email) =>
-    email.status === 'SENT'
-  ).length;
+  const sentCount = sentEmails.length;
 
   return (
     <div className="min-h-screen bg-white text-slate-800 lg:flex">
@@ -273,11 +278,10 @@ function Sidebar({
       <div className="flex h-16 items-center border-b border-slate-100 px-5">
         <div className="flex items-center gap-2.5 text-lg font-extrabold tracking-tight text-slate-900">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-emerald-700 font-serif text-lg text-emerald-100">
-            R
+            <Inbox size={17} strokeWidth={2.4} />
           </span>
 
-          reach
-          <span className="text-emerald-600">inbox</span>
+          <span className="font-extrabold tracking-tight">ReachInbox</span>
         </div>
       </div>
 
@@ -353,6 +357,7 @@ function Sidebar({
           onClick={() => onChange('scheduled')}
           label="Scheduled"
           count={scheduledCount}
+          icon={<CalendarClock size={15} />}
         />
 
         <NavItem
@@ -360,6 +365,7 @@ function Sidebar({
           onClick={() => onChange('sent')}
           label="Sent"
           count={sentCount}
+          icon={<MailCheck size={15} />}
         />
       </nav>
     </aside>
@@ -371,11 +377,13 @@ function NavItem({
   onClick,
   label,
   count,
+  icon,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
   count: number;
+  icon: React.ReactNode;
 }) {
   return (
     <button
@@ -387,7 +395,7 @@ function NavItem({
       onClick={onClick}
     >
       <span className="flex items-center gap-2">
-        <Mail size={15} />
+        {icon}
         {label}
       </span>
 
@@ -436,11 +444,10 @@ function Login() {
       <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm sm:p-10">
         <div className="mb-12 flex items-center gap-2.5 text-xl font-extrabold tracking-tight text-slate-900">
           <span className="grid h-9 w-9 place-items-center rounded-lg bg-emerald-700 font-serif text-xl text-emerald-100">
-            R
+            <Inbox size={19} strokeWidth={2.4} />
           </span>
 
-          reach
-          <span className="text-emerald-600">inbox</span>
+          ReachInbox
         </div>
 
         <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-600">
@@ -562,14 +569,10 @@ function EmailList({
                     ? 'bg-emerald-50 text-emerald-700'
                     : row.status === 'FAILED'
                     ? 'bg-red-50 text-red-700'
-                    : row.status === 'PROCESSING'
-                    ? 'bg-amber-50 text-amber-700'
                     : 'bg-slate-100 text-slate-600'
                 }`}
               >
-                {row.status === 'PROCESSING'
-                  ? 'Sending'
-                  : row.status === 'FAILED'
+                {row.status === 'FAILED'
                   ? 'Failed'
                   : row.status === 'SENT'
                   ? 'Sent'
@@ -599,6 +602,7 @@ function Compose({
       .slice(0, 16)
   );
   const [delaySeconds, setDelaySeconds] = useState('2');
+  const [hourlyLimit, setHourlyLimit] = useState('200');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -773,6 +777,25 @@ function Compose({
 
               <span className="mt-1 block text-[11px] font-normal text-slate-400">
                 seconds
+              </span>
+            </label>
+
+            <label className="text-xs font-semibold text-slate-600">
+              Hourly message limit
+
+              <input
+                className="mt-2 h-11 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100"
+                type="number"
+                min="1"
+                step="1"
+                value={hourlyLimit}
+                onChange={(event) =>
+                  setHourlyLimit(event.target.value)
+                }
+              />
+
+              <span className="mt-1 block text-[11px] font-normal text-slate-400">
+                messages per hour
               </span>
             </label>
           </div>

@@ -388,7 +388,7 @@ app.post('/api/campaigns', async (req, res) => {
 
 async function reconcileMissingJobs() {
   const stale = await prisma.scheduledEmail.updateMany({
-    where: { status: 'PROCESSING', processingAt: { lt: new Date(Date.now() - 15 * 60_000) } },
+    where: { status: 'SCHEDULED', processingAt: { lt: new Date(Date.now() - 15 * 60_000) } },
     data: { status: 'SCHEDULED', processingAt: null },
   });
 

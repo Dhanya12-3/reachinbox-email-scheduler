@@ -14,7 +14,7 @@ A production-minded email scheduling slice built with Express, BullMQ, Redis, Po
 
 ## Architecture
 
-The API authenticates a user, validates sender ownership, creates Campaign and ScheduledEmail rows in PostgreSQL, then enqueues deterministic BullMQ delayed jobs. The worker claims `QUEUED` rows atomically, sends through configured Ethereal SMTP, and records `SENT` plus the Ethereal preview URL or `FAILED` after three BullMQ attempts. Redis AOF and a volume preserve delayed jobs across container restarts.
+The API authenticates a user, validates sender ownership, creates Campaign and ScheduledEmail rows in PostgreSQL, then enqueues deterministic BullMQ delayed jobs. The worker atomically claims due `SCHEDULED` rows, sends through the configured mail provider, and records `SENT` with `sentAt` only after successful delivery. Delivery failures are retried three times and then recorded as `FAILED`. Redis AOF and a volume preserve delayed jobs across container restarts.
 
 `db:migrate` runs `prisma migrate deploy`, including the additive production schema migration. It never resets or deletes production data.
 
@@ -36,14 +36,16 @@ Frontend variable: `VITE_API_URL`, set to the deployed backend URL, with no trai
 
 Register `GOOGLE_CALLBACK_URL` exactly in Google Cloud Console. For production this is `https://<backend-service>.onrender.com/auth/google/callback`; keep the localhost callback as a separate development OAuth redirect URI.
 
-Worker concurrency and throttling are configurable. Each sender uses a Redis Lua-backed fixed-hour counter (`sender:<id>:hour:<window>`), with an atomic increment and expiry. If the limit is exhausted, the job is moved to the next hour window rather than failed. `MIN_SEND_DELAY_MS` is enforced with a Redis-backed sender lock, so multiple workers share the delay. For a 1000-recipient burst, BullMQ holds jobs durably and the sender/hour limits spread them across future windows.
+BullMQ handles the scheduled delivery time and retry backoff. There is no queued or hourly-limit delivery state; emails remain `SCHEDULED` until the worker successfully sends them or permanently records `FAILED`.
+
+For Resend testing, use `MAIL_PROVIDER=resend`, `RESEND_FROM=onboarding@resend.dev`, and test with `dhanyaharikant777@gmail.com`. Resend accounts in testing mode can send only to the account owner's email address; example.com and example.org recipients will be rejected until the account is approved for production sending.
 
 ## Features
 
-- Create campaigns with a sender, subject/body, CSV/TXT recipient list, start time, delay, and hourly limit.
+- Create campaigns with a sender, subject/body, CSV/TXT recipient list, start time, and delay.
 - Scheduled and sent views with loading, empty, and error states.
 - Persisted HTTP-only email and Google OAuth sessions with logout and protected API routes.
-- Configurable worker concurrency, per-sender hourly limit, and inter-send delay.
+- Configurable worker concurrency and scheduled delivery delay.
 - Dockerized PostgreSQL and Redis.
 
 ## Assumptions and trade-offs

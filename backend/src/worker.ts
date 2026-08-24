@@ -12,9 +12,9 @@ async function claim(id: string) {
       id,
       scheduledAt: { lte: new Date() },
       status: 'SCHEDULED',
+      processingAt: null,
     },
     data: {
-      status: 'PROCESSING',
       processingAt: new Date(),
       attempts: { increment: 1 },
     },
@@ -67,6 +67,7 @@ export function startWorker() {
       });
 
       console.log(`[DEBUG] sendEmail RESULT ${email.id} = SUCCESS`);
+      console.log(`[EMAIL] delivery successful ${email.id}`);
       console.log(`[DEBUG] ABOUT TO UPDATE DB TO SENT ${email.id}`);
 
       await prisma.scheduledEmail.update({
@@ -78,13 +79,13 @@ export function startWorker() {
           error: null,
         },
       });
+      console.log(`[EMAIL] status updated to SENT ${email.id}`);
 
       const afterUpdate = await prisma.scheduledEmail.findUnique({
         where: { id: email.id },
         select: { status: true },
       });
       console.log(`[DEBUG] DB STATUS AFTER UPDATE ${email.id} = ${afterUpdate?.status ?? 'MISSING'}`);
-      console.log(`[EMAIL] sent successfully ${email.id}`);
       console.log(`Email sent to ${email.recipientEmail}${preview ? `; Preview: ${preview}` : ''}`);
     } catch (error) {
       console.error(`[DEBUG] sendEmail RESULT ${job.data.scheduledEmailId} = ERROR: ${error instanceof Error ? error.message : String(error)}`);
