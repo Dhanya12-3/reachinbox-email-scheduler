@@ -61,9 +61,9 @@ function setSession(response: express.Response, token: string) {
   response.setHeader('Set-Cookie', `${sessionCookie}=${token}; HttpOnly; ${sameSite}; Path=/; Max-Age=604800`);
 }
 
-async function enqueueWithTimeout(emailId: string, sender: string, scheduledAt: Date) {
+async function enqueueWithTimeout(emailId: string, scheduledAt: Date) {
   return Promise.race([
-    enqueueEmail(emailId, sender, scheduledAt),
+    enqueueEmail(emailId, scheduledAt),
     new Promise<never>((_, reject) => {
       setTimeout(() => reject(new Error(`Queue insertion timed out after ${env.REDIS_CONNECT_TIMEOUT_MS}ms.`)), env.REDIS_CONNECT_TIMEOUT_MS + 1000);
     }),
@@ -313,13 +313,13 @@ app.post('/api/emails/schedule', async (req, res) => {
   });
 
   try {
-    const job = await enqueueEmail(email.id, sender.email, scheduledAt);
+    const job = await enqueueEmail(email.id, scheduledAt);
     const saved = await prisma.scheduledEmail.update({ where: { id: email.id }, data: { bullJobId: job.id } });
     return res.status(201).json({ email: saved, jobId: job.id });
   } catch (error) {
     await prisma.scheduledEmail.update({
       where: { id: email.id },
-      data: { status: 'SCHEDULED', error: error instanceof Error ? error.message : 'Queue unavailable' },
+      data: { status: 'SCHEDULED' },
     });
     return res.status(503).json({ error: 'Email was stored but could not be scheduled. Retry after Redis is available.', emailId: email.id });
   }
@@ -375,7 +375,7 @@ app.post('/api/campaigns', async (req, res) => {
 
   try {
     await Promise.all(campaign.emails.map(async email => {
-      const job = await enqueueWithTimeout(email.id, sender.email, email.scheduledAt);
+      const job = await enqueueWithTimeout(email.id, email.scheduledAt);
       await prisma.scheduledEmail.update({ where: { id: email.id }, data: { bullJobId: job.id } });
       console.log(`Email scheduled: ${email.id} for ${email.scheduledAt.toISOString()}`);
     }));
@@ -387,11 +387,6 @@ app.post('/api/campaigns', async (req, res) => {
 });
 
 async function reconcileMissingJobs() {
-  const stale = await prisma.scheduledEmail.updateMany({
-    where: { status: 'SCHEDULED', processingAt: { lt: new Date(Date.now() - 15 * 60_000) } },
-    data: { status: 'SCHEDULED', processingAt: null },
-  });
-
   const missing = await prisma.scheduledEmail.findMany({
     where: { status: 'SCHEDULED', bullJobId: null },
     include: { campaign: { include: { sender: true } } },
@@ -399,7 +394,7 @@ async function reconcileMissingJobs() {
 
   let reconciled = 0;
   for (const email of missing) {
-    const job = await enqueueEmail(email.id, email.campaign.sender.email, email.scheduledAt);
+    const job = await enqueueEmail(email.id, email.scheduledAt);
     await prisma.scheduledEmail.update({
       where: { id: email.id },
       data: { bullJobId: job.id },
@@ -407,8 +402,8 @@ async function reconcileMissingJobs() {
     reconciled += 1;
   }
 
-  if (reconciled || stale.count) {
-    console.log(`Reconciled ${reconciled} missing jobs and ${stale.count} stale claims`);
+  if (reconciled) {
+    console.log(`Reconciled ${reconciled} missing demo jobs`);
   }
 }
 

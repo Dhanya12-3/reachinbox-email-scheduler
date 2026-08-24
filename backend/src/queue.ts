@@ -17,7 +17,7 @@ export const connection = new IORedis(env.REDIS_URL, {
 	retryStrategy: attempts => Math.min(attempts * 500, 5000),
 });
 export const emailQueue = new Queue(QUEUE_NAME, { connection });
-export type EmailJob = { scheduledEmailId: string; sender: string };
+export type EmailJob = { scheduledEmailId: string };
 
 connection.on('connect', () => console.log(`Redis connecting (${redisUrl.protocol}//${redisUrl.hostname}:${redisUrl.port || (redisUrl.protocol === 'rediss:' ? 6380 : 6379)})`));
 connection.on('ready', () => console.log('Redis connection ready'));
@@ -32,7 +32,7 @@ export async function waitForQueue(timeoutMs = env.REDIS_CONNECT_TIMEOUT_MS) {
 	]);
 }
 
-export async function enqueueEmail(scheduledEmailId: string, sender: string, scheduledAt: Date, suffix = '') {
+export async function enqueueEmail(scheduledEmailId: string, scheduledAt: Date, suffix = '') {
 	await waitForQueue();
-	return emailQueue.add(`deliver:${scheduledEmailId}`, { scheduledEmailId, sender }, { jobId: `${scheduledEmailId}${suffix}`, delay: Math.max(0, scheduledAt.getTime() - Date.now()), attempts: 3, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: 1000, removeOnFail: 1000 });
+	return emailQueue.add(`demo:${scheduledEmailId}`, { scheduledEmailId }, { jobId: `${scheduledEmailId}${suffix}`, delay: Math.max(0, scheduledAt.getTime() - Date.now()), attempts: 1, removeOnComplete: 1000, removeOnFail: 1000 });
 }

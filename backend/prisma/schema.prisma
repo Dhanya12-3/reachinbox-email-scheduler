@@ -10,7 +10,6 @@ datasource db {
 enum EmailStatus {
   SCHEDULED
   SENT
-  FAILED
 }
 
 model User {
@@ -66,11 +65,8 @@ model ScheduledEmail {
   body String
   scheduledAt DateTime
   status EmailStatus @default(SCHEDULED)
-  attempts Int @default(0)
   sentAt DateTime?
-  error String?
   bullJobId String? @unique
-  processingAt DateTime?
   campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
